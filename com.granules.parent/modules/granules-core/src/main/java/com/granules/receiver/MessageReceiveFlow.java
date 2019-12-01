@@ -167,7 +167,7 @@ public abstract class MessageReceiveFlow {
 		@Setter(value = AccessLevel.PRIVATE)
 		private int nextReceivedOffset;
 		private MessageOffset messageReceivedOffset;
-		private final ConcurrentMap<String, ?> header = new ConcurrentHashMap<>();
+		private final ConcurrentMap<String, Object> header = new ConcurrentHashMap<>();
 	}
 
 }

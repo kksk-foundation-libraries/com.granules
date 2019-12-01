@@ -206,7 +206,7 @@ public abstract class MessagePublishFlow {
 		@Setter(value = AccessLevel.PRIVATE)
 		private int nextPublishedOffset;
 		private MessageOffset messageOffsetPublished;
-		private final ConcurrentMap<String, ?> header = new ConcurrentHashMap<>();
+		private final ConcurrentMap<String, Object> header = new ConcurrentHashMap<>();
 	}
 
 }

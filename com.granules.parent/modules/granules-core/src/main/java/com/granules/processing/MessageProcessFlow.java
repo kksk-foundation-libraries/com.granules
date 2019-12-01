@@ -1,6 +1,7 @@
 package com.granules.processing;
 
 import java.lang.management.ManagementFactory;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.locks.Lock;
 
@@ -195,7 +196,7 @@ public abstract class MessageProcessFlow {
 		@Setter(value = AccessLevel.PRIVATE)
 		private Lock lock;
 		private MessageProcessDirection messageProcessDirection;
-		private ConcurrentMap<String, ?> header;
+		private final ConcurrentMap<String, Object> header = new ConcurrentHashMap<>();
 	}
 
 }
