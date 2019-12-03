@@ -126,7 +126,6 @@ public abstract class MessageReceiveFlow {
 	}
 
 	private MessageContext lock(MessageContext messageContext) {
-		LOG.debug("lock thread:[{}]", Thread.currentThread().getName());
 		Binary binaryMessageOffsetKey = messageContext.binaryReceivedMessageOffsetKey();
 		Lock lock = offsetCache.lock(binaryMessageOffsetKey);
 		lock.lock();
@@ -167,7 +166,6 @@ public abstract class MessageReceiveFlow {
 	}
 
 	private MessageContext unlock(MessageContext messageContext) {
-		LOG.debug("unlock thread:[{}]", Thread.currentThread().getName());
 		Lock lock = messageContext.lock();
 		lock.unlock();
 		return messageContext;

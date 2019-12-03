@@ -21,6 +21,7 @@ import lombok.Data;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.experimental.Accessors;
+import reactor.core.publisher.ConnectableFlux;
 import reactor.core.publisher.Flux;
 
 public abstract class MessagePublishFlow {
@@ -49,6 +50,7 @@ public abstract class MessagePublishFlow {
 		private MessageOffset messageOffsetPublished;
 		private final ConcurrentMap<String, Object> header = new ConcurrentHashMap<>();
 	}
+
 	private static final Logger LOG = LoggerFactory.getLogger(MessagePublishFlow.class);
 
 	private static final String PROCESS_ID = ManagementFactory.getRuntimeMXBean().getName() + ":" + MessagePublishFlow.class.getSimpleName();
@@ -159,7 +161,7 @@ public abstract class MessagePublishFlow {
 	}
 
 	public void subscribe(Subscriber<MessageContext> publishedMessageSubscriber, Subscriber<MessageContext> retryedMessageSubscriber) {
-		Flux<MessageContext> upstream = //
+		ConnectableFlux<MessageContext> upstream = //
 				createPublisherStream() //
 						.map(this::dequeue) //
 						.map(this::createMessageOffsetKey) //
@@ -169,6 +171,7 @@ public abstract class MessagePublishFlow {
 						.map(this::createProcessedMessageOffsetKey) //
 						.map(this::getPublishedCurrentOffset) //
 						.map(this::getProcessedCurrentOffset) //
+						.publish() //
 		;
 		upstream //
 				.filter(this::isPublishable) //
@@ -187,6 +190,7 @@ public abstract class MessagePublishFlow {
 				.map(this::unlock) //
 				.subscribe(retryedMessageSubscriber) //
 		;
+		upstream.connect();
 	}
 
 	private MessageContext unlock(MessageContext messageContext) {

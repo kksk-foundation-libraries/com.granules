@@ -1,4 +1,4 @@
-package com.granules.receiver;
+package com.granules.publisher;
 
 import java.util.function.Consumer;
 
@@ -7,14 +7,17 @@ import org.reactivestreams.Subscriber;
 import org.reactivestreams.Subscription;
 
 import com.granules.model.colfer.Message;
+import com.granules.receiver.MessageReceiveFlow;
 
 import reactor.core.publisher.Flux;
 
 public class TestMessageReceiveFlow extends MessageReceiveFlow {
 	private Consumer<MessageContext> consumer = null;
+	private final TestMessagePublishFlow publishFlow;
 
-	public TestMessageReceiveFlow(Ignite cluster, String messageCacheName, String offsetCacheName, String processingCacheName) {
+	public TestMessageReceiveFlow(Ignite cluster, String messageCacheName, String offsetCacheName, String processingCacheName, TestMessagePublishFlow publishFlow) {
 		super(cluster, messageCacheName, offsetCacheName, processingCacheName);
+		this.publishFlow = publishFlow;
 	}
 
 	@Override
@@ -39,6 +42,11 @@ public class TestMessageReceiveFlow extends MessageReceiveFlow {
 		consumer.accept(messageContext);
 	}
 
+	@Override
+	protected MessageContext enqueue(MessageContext messageContext) {
+		publishFlow.put(messageContext.messageReceivedOffset());
+		return messageContext;
+	}
 	static class LocalSubscriber implements Subscriber<MessageContext> {
 		private Subscription upstream;
 
@@ -61,6 +69,6 @@ public class TestMessageReceiveFlow extends MessageReceiveFlow {
 		@Override
 		public void onComplete() {
 		}
-
+		
 	}
 }
