@@ -24,10 +24,36 @@ import lombok.experimental.Accessors;
 import reactor.core.publisher.Flux;
 
 public abstract class MessagePublishFlow {
+	@Data
+	@Accessors(fluent = true)
+	protected static class MessageContext {
+		private MessageOffset messageOffset;
+		@Getter(value = AccessLevel.PRIVATE)
+		@Setter(value = AccessLevel.PRIVATE)
+		private Binary binaryMessageOffsetKey;
+		@Getter(value = AccessLevel.PRIVATE)
+		@Setter(value = AccessLevel.PRIVATE)
+		private Binary binaryMessageOffsetKeyProcessed;
+		@Getter(value = AccessLevel.PRIVATE)
+		@Setter(value = AccessLevel.PRIVATE)
+		private Lock lock;
+		@Getter(value = AccessLevel.PRIVATE)
+		@Setter(value = AccessLevel.PRIVATE)
+		private int currentPublishedOffset;
+		@Getter(value = AccessLevel.PRIVATE)
+		@Setter(value = AccessLevel.PRIVATE)
+		private int currentProcessedOffset;
+		@Getter(value = AccessLevel.PRIVATE)
+		@Setter(value = AccessLevel.PRIVATE)
+		private int nextPublishedOffset;
+		private MessageOffset messageOffsetPublished;
+		private final ConcurrentMap<String, Object> header = new ConcurrentHashMap<>();
+	}
 	private static final Logger LOG = LoggerFactory.getLogger(MessagePublishFlow.class);
-	private static final String PROCESS_ID = ManagementFactory.getRuntimeMXBean().getName() + ":" + MessagePublishFlow.class.getSimpleName();
 
+	private static final String PROCESS_ID = ManagementFactory.getRuntimeMXBean().getName() + ":" + MessagePublishFlow.class.getSimpleName();
 	private final IgniteCache<Binary, Integer> offsetCache;
+
 	private final IgniteCache<Binary, String> processingCache;
 
 	public MessagePublishFlow(Ignite cluster, String offsetCacheName, String processingCacheName) {
@@ -38,17 +64,97 @@ public abstract class MessagePublishFlow {
 		}
 	}
 
+	protected MessageContext ack(MessageContext messageContext) {
+		return messageContext;
+	}
+
+	private MessageContext begin(MessageContext messageContext) {
+		Binary binaryMessageOffsetKey = messageContext.binaryMessageOffsetKey();
+		processingCache.put(binaryMessageOffsetKey, PROCESS_ID);
+		return messageContext;
+	}
+
+	private MessageContext createMessageOffsetKey(MessageContext messageContext) {
+		MessageOffset messageOffset = messageContext.messageOffset();
+		MessageOffsetKey messageOffsetKey = //
+				new MessageOffsetKey() //
+						.withMessageStatus(MessageStatus.PUBLISHED.code) //
+						.withMessageType(messageOffset.getMessageType()) //
+						.withKey(messageOffset.getKey()) //
+		;
+		return messageContext.binaryMessageOffsetKey(Binary.of(messageOffsetKey));
+	}
+
+	private MessageContext createProcessedMessageOffsetKey(MessageContext messageContext) {
+		MessageOffset messageOffset = messageContext.messageOffset();
+		MessageOffsetKey messageOffsetKey = //
+				new MessageOffsetKey() //
+						.withMessageStatus(MessageStatus.PROCESSED.code) //
+						.withMessageType(messageOffset.getMessageType()) //
+						.withKey(messageOffset.getKey()) //
+		;
+		return messageContext.binaryMessageOffsetKeyProcessed(Binary.of(messageOffsetKey));
+	}
+
 	protected abstract Flux<MessageContext> createPublisherStream();
 
 	protected abstract MessageContext dequeue(MessageContext messageContext);
 
-	protected MessageContext ack(MessageContext messageContext) {
+	private MessageContext end(MessageContext messageContext) {
+		Binary binaryMessageOffsetKey = messageContext.binaryMessageOffsetKey();
+		processingCache.remove(binaryMessageOffsetKey);
 		return messageContext;
+	}
+
+	private MessageContext getProcessedCurrentOffset(MessageContext messageContext) {
+		Binary binaryMessageOffsetKey = messageContext.binaryMessageOffsetKeyProcessed();
+		Integer currentOffset = offsetCache.get(binaryMessageOffsetKey);
+		if (currentOffset == null) {
+			currentOffset = 0;
+		}
+		return messageContext.currentProcessedOffset(currentOffset);
+	}
+
+	private MessageContext getPublishedCurrentOffset(MessageContext messageContext) {
+		Binary binaryMessageOffsetKey = messageContext.binaryMessageOffsetKey();
+		Integer currentOffset = offsetCache.get(binaryMessageOffsetKey);
+		if (currentOffset == null) {
+			currentOffset = 0;
+		}
+		return messageContext.currentPublishedOffset(currentOffset);
+	}
+
+	private MessageContext getPublishedNextOffset(MessageContext messageContext) {
+		int currentOffset = messageContext.currentPublishedOffset();
+		int nextOffset = currentOffset + 1;
+		return messageContext.nextPublishedOffset(nextOffset);
+	}
+
+	private boolean isNotPublishable(MessageContext messageContext) {
+		return messageContext.currentPublishedOffset() != messageContext.currentProcessedOffset();
+	}
+
+	private boolean isPublishable(MessageContext messageContext) {
+		return messageContext.currentPublishedOffset() == messageContext.currentProcessedOffset();
+	}
+
+	private MessageContext lock(MessageContext messageContext) {
+		Binary binaryMessageOffsetKey = messageContext.binaryMessageOffsetKey();
+		Lock lock = offsetCache.lock(binaryMessageOffsetKey);
+		lock.lock();
+		return messageContext.lock(lock);
 	}
 
 	protected abstract MessageContext publish(MessageContext messageContext);
 
 	protected MessageContext retry(MessageContext messageContext) {
+		return messageContext;
+	}
+
+	private MessageContext savePublishedNextOffset(MessageContext messageContext) {
+		Binary binaryMessageOffsetKey = messageContext.binaryMessageOffsetKey();
+		int nextOffset = messageContext.nextPublishedOffset();
+		offsetCache.put(binaryMessageOffsetKey, nextOffset);
 		return messageContext;
 	}
 
@@ -83,70 +189,10 @@ public abstract class MessagePublishFlow {
 		;
 	}
 
-	private MessageContext createMessageOffsetKey(MessageContext messageContext) {
-		MessageOffset messageOffset = messageContext.messageOffset();
-		MessageOffsetKey messageOffsetKey = //
-				new MessageOffsetKey() //
-						.withMessageStatus(MessageStatus.PUBLISHED.code) //
-						.withMessageType(messageOffset.getMessageType()) //
-						.withKey(messageOffset.getKey()) //
-		;
-		return messageContext.binaryMessageOffsetKey(Binary.of(messageOffsetKey));
-	}
-
-	private MessageContext lock(MessageContext messageContext) {
-		Binary binaryMessageOffsetKey = messageContext.binaryMessageOffsetKey();
-		Lock lock = offsetCache.lock(binaryMessageOffsetKey);
-		return messageContext.lock(lock);
-	}
-
-	private MessageContext begin(MessageContext messageContext) {
-		Binary binaryMessageOffsetKey = messageContext.binaryMessageOffsetKey();
-		processingCache.put(binaryMessageOffsetKey, PROCESS_ID);
+	private MessageContext unlock(MessageContext messageContext) {
+		Lock lock = messageContext.lock();
+		lock.unlock();
 		return messageContext;
-	}
-
-	private MessageContext createProcessedMessageOffsetKey(MessageContext messageContext) {
-		MessageOffset messageOffset = messageContext.messageOffset();
-		MessageOffsetKey messageOffsetKey = //
-				new MessageOffsetKey() //
-						.withMessageStatus(MessageStatus.PROCESSED.code) //
-						.withMessageType(messageOffset.getMessageType()) //
-						.withKey(messageOffset.getKey()) //
-		;
-		return messageContext.binaryMessageOffsetKeyProcessed(Binary.of(messageOffsetKey));
-	}
-
-	private MessageContext getPublishedCurrentOffset(MessageContext messageContext) {
-		Binary binaryMessageOffsetKey = messageContext.binaryMessageOffsetKey();
-		Integer currentOffset = offsetCache.get(binaryMessageOffsetKey);
-		if (currentOffset == null) {
-			currentOffset = 0;
-		}
-		return messageContext.currentPublishedOffset(currentOffset);
-	}
-
-	private MessageContext getProcessedCurrentOffset(MessageContext messageContext) {
-		Binary binaryMessageOffsetKey = messageContext.binaryMessageOffsetKeyProcessed();
-		Integer currentOffset = offsetCache.get(binaryMessageOffsetKey);
-		if (currentOffset == null) {
-			currentOffset = 0;
-		}
-		return messageContext.currentProcessedOffset(currentOffset);
-	}
-
-	private boolean isPublishable(MessageContext messageContext) {
-		return messageContext.currentPublishedOffset() == messageContext.currentProcessedOffset();
-	}
-
-	private boolean isNotPublishable(MessageContext messageContext) {
-		return messageContext.currentPublishedOffset() != messageContext.currentProcessedOffset();
-	}
-
-	private MessageContext getPublishedNextOffset(MessageContext messageContext) {
-		int currentOffset = messageContext.currentPublishedOffset();
-		int nextOffset = currentOffset + 1;
-		return messageContext.nextPublishedOffset(nextOffset);
 	}
 
 	private MessageContext updateMessageOffset(MessageContext messageContext) {
@@ -162,51 +208,6 @@ public abstract class MessagePublishFlow {
 			;
 		}
 		return messageContext.messageOffsetPublished(messageOffset);
-	}
-
-	private MessageContext savePublishedNextOffset(MessageContext messageContext) {
-		Binary binaryMessageOffsetKey = messageContext.binaryMessageOffsetKey();
-		int nextOffset = messageContext.nextPublishedOffset();
-		offsetCache.put(binaryMessageOffsetKey, nextOffset);
-		return messageContext;
-	}
-
-	private MessageContext end(MessageContext messageContext) {
-		Binary binaryMessageOffsetKey = messageContext.binaryMessageOffsetKey();
-		processingCache.remove(binaryMessageOffsetKey);
-		return messageContext;
-	}
-
-	private MessageContext unlock(MessageContext messageContext) {
-		Lock lock = messageContext.lock();
-		lock.unlock();
-		return messageContext;
-	}
-
-	@Data
-	@Accessors(fluent = true)
-	protected static class MessageContext {
-		private MessageOffset messageOffset;
-		@Getter(value = AccessLevel.PRIVATE)
-		@Setter(value = AccessLevel.PRIVATE)
-		private Binary binaryMessageOffsetKey;
-		@Getter(value = AccessLevel.PRIVATE)
-		@Setter(value = AccessLevel.PRIVATE)
-		private Binary binaryMessageOffsetKeyProcessed;
-		@Getter(value = AccessLevel.PRIVATE)
-		@Setter(value = AccessLevel.PRIVATE)
-		private Lock lock;
-		@Getter(value = AccessLevel.PRIVATE)
-		@Setter(value = AccessLevel.PRIVATE)
-		private int currentPublishedOffset;
-		@Getter(value = AccessLevel.PRIVATE)
-		@Setter(value = AccessLevel.PRIVATE)
-		private int currentProcessedOffset;
-		@Getter(value = AccessLevel.PRIVATE)
-		@Setter(value = AccessLevel.PRIVATE)
-		private int nextPublishedOffset;
-		private MessageOffset messageOffsetPublished;
-		private final ConcurrentMap<String, Object> header = new ConcurrentHashMap<>();
 	}
 
 }
