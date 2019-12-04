@@ -1,6 +1,10 @@
 package com.granules.publisher;
 
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 import javax.cache.Cache.Entry;
@@ -12,6 +16,7 @@ import org.apache.ignite.cache.query.QueryCursor;
 import org.apache.ignite.cache.query.ScanQuery;
 import org.apache.ignite.configuration.CacheConfiguration;
 import org.apache.ignite.configuration.IgniteConfiguration;
+import org.junit.Assert;
 import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -49,27 +54,44 @@ public class PublisherTest {
 		for (int i = 0; i < 10; i++) {
 			uuids[i] = UUID.randomUUID();
 		}
+		CountDownLatch latch = new CountDownLatch(10);
+		ExecutorService tp = Executors.newFixedThreadPool(10);
 		for (int j = 0; j < 10; j++) {
-			for (int i = 0; i < 10; i++) {
-				UUID uuid = uuids[i];
-				byte[] key = new byte[16];
-				putLong(key, 0, uuid.getMostSignificantBits());
-				putLong(key, 8, uuid.getLeastSignificantBits());
-				Message message = new Message() //
-						.withMessageType(1) //
-						.withKey(key) //
-						.withValue(("" + j + ":" + i).getBytes()) //
-						.withTimestamp(System.currentTimeMillis()) //
-				;
-				receiveFlow.put(message);
-			}
+			final int x = j;
+			final UUID uuid = uuids[j];
+			final byte[] key = new byte[16];
+			putLong(key, 0, uuid.getMostSignificantBits());
+			putLong(key, 8, uuid.getLeastSignificantBits());
+			tp.submit(() -> {
+				for (int i = 0; i < 10; i++) {
+					Message message = new Message() //
+							.withMessageType(1) //
+							.withKey(key) //
+							.withValue(("" + x + ":" + i).getBytes()) //
+							.withTimestamp(System.currentTimeMillis()) //
+					;
+					receiveFlow.put(message);
+				}
+				latch.countDown();
+			});
+		}
+		try {
+			latch.await();
+		} catch (InterruptedException e) {
+			e.printStackTrace();
+		}
+		tp.shutdown();
+		try {
+			tp.awaitTermination(100, TimeUnit.MILLISECONDS);
+		} catch (InterruptedException e) {
+			e.printStackTrace();
 		}
 		final AtomicLong counter = new AtomicLong();
 		QueryCursor<Entry<Binary, byte[]>> cursorMessage = cluster.cache("message").query(new ScanQuery<Binary, byte[]>());
 		cursorMessage.forEach(entry -> {
 			MessageOffset messageOffset = new MessageOffset().unmarshal(entry.getKey().getData());
 			Message message = new Message().unmarshal(entry.getValue());
-			LOG.debug("message key:[{}], offset:[{}], value:[{}]", hex(message.getKey()), messageOffset.getOffset(), hex(message.getValue()));
+			LOG.debug("message cache key:[{}], offset:[{}], value:[{}]", hex(message.getKey()), messageOffset.getOffset(), new String(message.getValue()));
 			counter.incrementAndGet();
 		});
 		long messageCount = counter.get();
@@ -80,7 +102,7 @@ public class PublisherTest {
 		cursorOffset.forEach(entry -> {
 			MessageOffsetKey messageOffsetKey = new MessageOffsetKey().unmarshal(entry.getKey().getData());
 			Integer offset = entry.getValue();
-			LOG.debug("offset status:[{}], key:[{}], offset:[{}]", hex(messageOffsetKey.getMessageStatus()), hex(messageOffsetKey.getKey()), offset);
+			LOG.debug("offset cache status:[{}], key:[{}], offset:[{}]", hex(messageOffsetKey.getMessageStatus()), hex(messageOffsetKey.getKey()), offset);
 			counter.incrementAndGet();
 		});
 		long offsetCount = counter.get();
@@ -91,11 +113,15 @@ public class PublisherTest {
 		cursorProcessing.forEach(entry -> {
 			MessageOffsetKey messageOffsetKey = new MessageOffsetKey().unmarshal(entry.getKey().getData());
 			String proc = entry.getValue();
-			LOG.debug("processing status:[{}], key:[{}], process:[{}]", hex(messageOffsetKey.getMessageStatus()), hex(messageOffsetKey.getKey()), proc);
+			LOG.debug("processing cache status:[{}], key:[{}], process:[{}]", hex(messageOffsetKey.getMessageStatus()), hex(messageOffsetKey.getKey()), proc);
 			counter.incrementAndGet();
 		});
 		long processingCount = counter.get();
 		LOG.debug("processing count:[{}]", processingCount);
+
+		Assert.assertTrue("message count must be 100", messageCount == 100L);
+		Assert.assertTrue("offset count must be 20", offsetCount == 20L);
+		Assert.assertTrue("processing count must be 0", processingCount == 0L);
 	}
 
 	static String hex(byte... data) {

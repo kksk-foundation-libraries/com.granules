@@ -1,4 +1,4 @@
-package com.granules.receiver;
+package com.granules.processing;
 
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -26,24 +26,35 @@ import com.granules.model.colfer.Message;
 import com.granules.model.colfer.MessageOffset;
 import com.granules.model.colfer.MessageOffsetKey;
 
-public class ReceiverTest {
+public class ProcessingTest {
 	static {
 		System.setProperty("org.slf4j.simpleLogger.defaultLogLevel", "DEBUG");
 	}
-	static final Logger LOG = LoggerFactory.getLogger(ReceiverTest.class);
+	static final Logger LOG = LoggerFactory.getLogger(ProcessingTest.class);
 
 	@Test
-	public void test001() {
-		Ignite ignite = Ignition.start( //
+	public void test() {
+		Ignite cluster = Ignition.start( //
 				new IgniteConfiguration().setCacheConfiguration( //
 						new CacheConfiguration<Binary, byte[]>().setName("message").setAtomicityMode(CacheAtomicityMode.TRANSACTIONAL), //
 						new CacheConfiguration<Binary, Integer>().setName("offset").setAtomicityMode(CacheAtomicityMode.TRANSACTIONAL), //
 						new CacheConfiguration<Binary, String>().setName("processing").setAtomicityMode(CacheAtomicityMode.TRANSACTIONAL) //
 				) //
 		);
-		TestMessageReceiveFlow receiveFlow = new TestMessageReceiveFlow(ignite, "message", "offset", "processing");
-		receiveFlow.subscribe(new TestMessageReceiveFlow.LocalSubscriber());
+		final String messageCacheName = "message";
+		final String offsetCacheName = "offset";
+		final String processingCacheName = "processing";
 
+		TestMessageProcessFlow processFlow = new TestMessageProcessFlow(cluster, messageCacheName, offsetCacheName, processingCacheName, //
+				message -> {
+					LOG.debug("processing message key:[{}], offset:[{}], value:[{}]", hex(message.getKey()), message.getOffset(), new String(message.getValue()));
+					return MessageProcessDirection.SUCCEED;
+				});
+		processFlow.subscribe(new TestMessageProcessFlow.LocalSubscriber(), new TestMessageProcessFlow.LocalSubscriber(), new TestMessageProcessFlow.LocalSubscriber(), new TestMessageProcessFlow.LocalSubscriber());
+		TestMessagePublishFlow publishFlow = new TestMessagePublishFlow(cluster, offsetCacheName, processingCacheName, processFlow);
+		publishFlow.subscribe(new TestMessagePublishFlow.LocalSubscriber(), new TestMessagePublishFlow.LocalSubscriber());
+		TestMessageReceiveFlow receiveFlow = new TestMessageReceiveFlow(cluster, messageCacheName, offsetCacheName, processingCacheName, publishFlow);
+		receiveFlow.subscribe(new TestMessageReceiveFlow.LocalSubscriber());
 		UUID[] uuids = new UUID[10];
 
 		for (int i = 0; i < 10; i++) {
@@ -82,44 +93,44 @@ public class ReceiverTest {
 			e.printStackTrace();
 		}
 		final AtomicLong counter = new AtomicLong();
-		QueryCursor<Entry<Binary, byte[]>> cursorMessage = ignite.cache("message").query(new ScanQuery<Binary, byte[]>());
+		QueryCursor<Entry<Binary, byte[]>> cursorMessage = cluster.cache("message").query(new ScanQuery<Binary, byte[]>());
 		cursorMessage.forEach(entry -> {
 			MessageOffset messageOffset = new MessageOffset().unmarshal(entry.getKey().getData());
 			Message message = new Message().unmarshal(entry.getValue());
-			LOG.debug("message key:[{}], offset:[{}], value:[{}]", hex(message.getKey()), messageOffset.getOffset(), new String(message.getValue()));
+			LOG.debug("message cache key:[{}], offset:[{}], value:[{}]", hex(message.getKey()), messageOffset.getOffset(), new String(message.getValue()));
 			counter.incrementAndGet();
 		});
-		LOG.debug("message count:[{}]", counter.get());
 		long messageCount = counter.get();
+		LOG.debug("message count:[{}]", messageCount);
 
 		counter.set(0);
-		QueryCursor<Entry<Binary, Integer>> cursorOffset = ignite.cache("offset").query(new ScanQuery<Binary, Integer>());
+		QueryCursor<Entry<Binary, Integer>> cursorOffset = cluster.cache("offset").query(new ScanQuery<Binary, Integer>());
 		cursorOffset.forEach(entry -> {
 			MessageOffsetKey messageOffsetKey = new MessageOffsetKey().unmarshal(entry.getKey().getData());
 			Integer offset = entry.getValue();
-			LOG.debug("offset key:[{}], offset:[{}]", hex(messageOffsetKey.getKey()), offset);
+			LOG.debug("offset cache status:[{}], key:[{}], offset:[{}]", hex(messageOffsetKey.getMessageStatus()), hex(messageOffsetKey.getKey()), offset);
 			counter.incrementAndGet();
 		});
-		LOG.debug("offset count:[{}]", counter.get());
 		long offsetCount = counter.get();
+		LOG.debug("offset count:[{}]", offsetCount);
 
 		counter.set(0);
-		QueryCursor<Entry<Binary, String>> cursorProcessing = ignite.cache("processing").query(new ScanQuery<Binary, String>());
+		QueryCursor<Entry<Binary, String>> cursorProcessing = cluster.cache("processing").query(new ScanQuery<Binary, String>());
 		cursorProcessing.forEach(entry -> {
 			MessageOffsetKey messageOffsetKey = new MessageOffsetKey().unmarshal(entry.getKey().getData());
 			String proc = entry.getValue();
-			LOG.debug("processing key:[{}], process:[{}]", hex(messageOffsetKey.getKey()), proc);
+			LOG.debug("processing cache status:[{}], key:[{}], process:[{}]", hex(messageOffsetKey.getMessageStatus()), hex(messageOffsetKey.getKey()), proc);
 			counter.incrementAndGet();
 		});
-		LOG.debug("processing count:[{}]", counter.get());
 		long processingCount = counter.get();
+		LOG.debug("processing count:[{}]", processingCount);
 
 		Assert.assertTrue("message count must be 100", messageCount == 100L);
-		Assert.assertTrue("offset count must be 10", offsetCount == 10L);
+		Assert.assertTrue("offset count must be 30", offsetCount == 30L);
 		Assert.assertTrue("processing count must be 0", processingCount == 0L);
 	}
 
-	private static String hex(byte[] data) {
+	static String hex(byte... data) {
 		StringBuilder sb = new StringBuilder();
 		for (byte d : data) {
 			sb.append(String.format("%02x", d));
@@ -137,4 +148,5 @@ public class ReceiverTest {
 		b[off + 1] = (byte) (val >>> 48);
 		b[off] = (byte) (val >>> 56);
 	}
+
 }

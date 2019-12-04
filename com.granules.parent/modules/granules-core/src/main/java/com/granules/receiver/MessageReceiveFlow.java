@@ -135,7 +135,7 @@ public abstract class MessageReceiveFlow {
 	private MessageContext saveMessage(MessageContext messageContext) {
 		Message message = messageContext.message();
 		MessageOffset messageOffset = messageContext.messageReceivedOffset();
-		messageCache.put(Binary.of(messageOffset), message.marshal());
+		messageCache.put(Binary.of(messageOffset), message.withOffset(messageContext.messageReceivedOffset().getOffset()).marshal());
 		return messageContext;
 	}
 
