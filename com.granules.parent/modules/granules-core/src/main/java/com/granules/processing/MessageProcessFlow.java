@@ -1,6 +1,7 @@
 package com.granules.processing;
 
 import java.lang.management.ManagementFactory;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.locks.Lock;
 
@@ -21,15 +22,32 @@ import lombok.Data;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.experimental.Accessors;
+import reactor.core.publisher.ConnectableFlux;
 import reactor.core.publisher.Flux;
 
 public abstract class MessageProcessFlow {
-	private static final Logger LOG = LoggerFactory.getLogger(MessageProcessFlow.class);
-	private static final String PROCESS_ID = ManagementFactory.getRuntimeMXBean().getName() + ":" + MessageProcessFlow.class.getSimpleName();
+	@Data
+	@Accessors(fluent = true)
+	protected static class MessageContext {
+		private MessageOffset messageOffset;
+		private Message message;
+		@Getter(value = AccessLevel.PRIVATE)
+		@Setter(value = AccessLevel.PRIVATE)
+		private Binary binaryMessageOffsetKey;
+		@Getter(value = AccessLevel.PRIVATE)
+		@Setter(value = AccessLevel.PRIVATE)
+		private Lock lock;
+		private MessageProcessDirection messageProcessDirection;
+		private final ConcurrentMap<String, Object> header = new ConcurrentHashMap<>();
+	}
 
+	private static final Logger LOG = LoggerFactory.getLogger(MessageProcessFlow.class);
+
+	private static final String PROCESS_ID = ManagementFactory.getRuntimeMXBean().getName() + ":" + MessageProcessFlow.class.getSimpleName();
 	private final IgniteCache<Binary, byte[]> messageCache;
 	private final IgniteCache<Binary, Integer> offsetCache;
 	private final IgniteCache<Binary, String> processingCache;
+
 	private final MessageProcessor messageProcessor;
 
 	public MessageProcessFlow(Ignite cluster, String messageCacheName, String offsetCacheName, String processingCacheName, MessageProcessor messageProcessor) {
@@ -42,11 +60,85 @@ public abstract class MessageProcessFlow {
 		}
 	}
 
+	protected MessageContext ack(MessageContext messageContext) {
+		return messageContext;
+	}
+
+	private MessageContext begin(MessageContext messageContext) {
+		Binary binaryMessageOffsetKey = messageContext.binaryMessageOffsetKey();
+		processingCache.put(binaryMessageOffsetKey, PROCESS_ID);
+		return messageContext;
+	}
+
+	private MessageContext createMessageOffsetKey(MessageContext messageContext) {
+		MessageOffset messageOffset = messageContext.messageOffset();
+		MessageOffsetKey messageOffsetKey = //
+				new MessageOffsetKey() //
+						.withMessageStatus(MessageStatus.PROCESSED.code) //
+						.withMessageType(messageOffset.getMessageType()) //
+						.withKey(messageOffset.getKey()) //
+		;
+		return messageContext.binaryMessageOffsetKey(Binary.of(messageOffsetKey));
+	}
+
 	protected abstract Flux<MessageContext> createProcessorStream();
 
 	protected abstract MessageContext dequeue(MessageContext messageContext);
 
-	protected MessageContext ack(MessageContext messageContext) {
+	private MessageContext end(MessageContext messageContext) {
+		Binary binaryMessageOffsetKey = messageContext.binaryMessageOffsetKey();
+		processingCache.remove(binaryMessageOffsetKey);
+		return messageContext;
+	}
+
+	private MessageContext getMessage(MessageContext messageContext) {
+		byte[] value = messageCache.get(Binary.of(messageContext.messageOffset()));
+		if (value != null) {
+			messageContext.message(new Message().unmarshal(value));
+		}
+		return messageContext;
+	}
+
+	private boolean isRetry(MessageContext messageContext) {
+		return messageContext.messageProcessDirection() == MessageProcessDirection.RETRY;
+	}
+
+	private boolean isSkip(MessageContext messageContext) {
+		return messageContext.messageProcessDirection() == MessageProcessDirection.SKIP;
+	}
+
+	private boolean isSucceed(MessageContext messageContext) {
+		return messageContext.messageProcessDirection() == MessageProcessDirection.SUCCEED;
+	}
+
+	private boolean isSuspend(MessageContext messageContext) {
+		return messageContext.messageProcessDirection() == MessageProcessDirection.SUSPEND;
+	}
+
+	private MessageContext lock(MessageContext messageContext) {
+		Binary binaryMessageOffsetKey = messageContext.binaryMessageOffsetKey();
+		Lock lock = offsetCache.lock(binaryMessageOffsetKey);
+		lock.lock();
+		return messageContext.lock(lock);
+	}
+
+	protected MessageContext onComplete(MessageContext messageContext) {
+		return messageContext;
+	}
+
+	protected MessageContext onRetry(MessageContext messageContext) {
+		return messageContext;
+	}
+
+	protected MessageContext onSkip(MessageContext messageContext) {
+		return onComplete(messageContext);
+	}
+
+	protected MessageContext onSucceed(MessageContext messageContext) {
+		return onComplete(messageContext);
+	}
+
+	protected MessageContext onSuspend(MessageContext messageContext) {
 		return messageContext;
 	}
 
@@ -55,28 +147,15 @@ public abstract class MessageProcessFlow {
 		return messageContext.messageProcessDirection(messageProcessDirection);
 	}
 
-	protected MessageContext onSucceed(MessageContext messageContext) {
-		return onComplete(messageContext);
-	}
-
-	protected MessageContext onRetry(MessageContext messageContext) {
-		return messageContext;
-	}
-
-	protected MessageContext onSuspend(MessageContext messageContext) {
-		return messageContext;
-	}
-
-	protected MessageContext onSkip(MessageContext messageContext) {
-		return onComplete(messageContext);
-	}
-
-	protected MessageContext onComplete(MessageContext messageContext) {
+	private MessageContext saveMessageOffsetKey(MessageContext messageContext) {
+		MessageOffset messageOffset = messageContext.messageOffset();
+		Binary binaryMessageOffsetKey = messageContext.binaryMessageOffsetKey();
+		offsetCache.put(binaryMessageOffsetKey, messageOffset.getOffset());
 		return messageContext;
 	}
 
 	public void subscribe(Subscriber<MessageContext> succeedSubscriber, Subscriber<MessageContext> retrySubscriber, Subscriber<MessageContext> suspendSubscriber, Subscriber<MessageContext> skipSubscriber) {
-		Flux<MessageContext> upstream = //
+		ConnectableFlux<MessageContext> upstream = //
 				createProcessorStream() //
 						.map(this::dequeue) //
 						.map(this::createMessageOffsetKey) //
@@ -85,6 +164,7 @@ public abstract class MessageProcessFlow {
 						.map(this::ack) //
 						.map(this::getMessage) //
 						.map(this::process) //
+						.publish() //
 		;
 		upstream //
 				.filter(this::isSucceed) //
@@ -115,87 +195,13 @@ public abstract class MessageProcessFlow {
 				.map(this::unlock) //
 				.subscribe(skipSubscriber) //
 		;
-	}
-
-	private MessageContext createMessageOffsetKey(MessageContext messageContext) {
-		MessageOffset messageOffset = messageContext.messageOffset();
-		MessageOffsetKey messageOffsetKey = //
-				new MessageOffsetKey() //
-						.withMessageStatus(MessageStatus.PROCESSED.code) //
-						.withMessageType(messageOffset.getMessageType()) //
-						.withKey(messageOffset.getKey()) //
-		;
-		return messageContext.binaryMessageOffsetKey(Binary.of(messageOffsetKey));
-	}
-
-	private MessageContext begin(MessageContext messageContext) {
-		Binary binaryMessageOffsetKey = messageContext.binaryMessageOffsetKey();
-		processingCache.put(binaryMessageOffsetKey, PROCESS_ID);
-		return messageContext;
+		upstream.connect();
 	}
 
 	private MessageContext unlock(MessageContext messageContext) {
 		Lock lock = messageContext.lock();
 		lock.unlock();
 		return messageContext;
-	}
-
-	private MessageContext getMessage(MessageContext messageContext) {
-		byte[] value = messageCache.get(Binary.of(messageContext.messageOffset()));
-		if (value != null) {
-			messageContext.message(new Message().unmarshal(value));
-		}
-		return messageContext;
-	}
-
-	private boolean isSucceed(MessageContext messageContext) {
-		return messageContext.messageProcessDirection() == MessageProcessDirection.SUCCEED;
-	}
-
-	private boolean isRetry(MessageContext messageContext) {
-		return messageContext.messageProcessDirection() == MessageProcessDirection.RETRY;
-	}
-
-	private boolean isSuspend(MessageContext messageContext) {
-		return messageContext.messageProcessDirection() == MessageProcessDirection.SUSPEND;
-	}
-
-	private boolean isSkip(MessageContext messageContext) {
-		return messageContext.messageProcessDirection() == MessageProcessDirection.SKIP;
-	}
-
-	private MessageContext lock(MessageContext messageContext) {
-		Binary binaryMessageOffsetKey = messageContext.binaryMessageOffsetKey();
-		Lock lock = offsetCache.lock(binaryMessageOffsetKey);
-		return messageContext.lock(lock);
-	}
-
-	private MessageContext end(MessageContext messageContext) {
-		Binary binaryMessageOffsetKey = messageContext.binaryMessageOffsetKey();
-		processingCache.remove(binaryMessageOffsetKey);
-		return messageContext;
-	}
-
-	private MessageContext saveMessageOffsetKey(MessageContext messageContext) {
-		MessageOffset messageOffset = messageContext.messageOffset();
-		Binary binaryMessageOffsetKey = messageContext.binaryMessageOffsetKey();
-		offsetCache.put(binaryMessageOffsetKey, messageOffset.getOffset());
-		return messageContext;
-	}
-
-	@Data
-	@Accessors(fluent = true)
-	protected static class MessageContext {
-		private MessageOffset messageOffset;
-		private Message message;
-		@Getter(value = AccessLevel.PRIVATE)
-		@Setter(value = AccessLevel.PRIVATE)
-		private Binary binaryMessageOffsetKey;
-		@Getter(value = AccessLevel.PRIVATE)
-		@Setter(value = AccessLevel.PRIVATE)
-		private Lock lock;
-		private MessageProcessDirection messageProcessDirection;
-		private ConcurrentMap<String, ?> header;
 	}
 
 }

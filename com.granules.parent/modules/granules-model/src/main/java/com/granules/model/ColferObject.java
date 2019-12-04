@@ -11,7 +11,8 @@ public abstract class ColferObject {
 
 	public final byte[] marshal() {
 		try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-			return marshal(out, null);
+			marshal(out, null);
+			return out.toByteArray();
 		} catch (IOException e) {
 			return null;
 		}

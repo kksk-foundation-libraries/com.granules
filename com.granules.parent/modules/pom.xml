@@ -64,5 +64,6 @@
 	<modules>
 		<module>granules-model</module>
 		<module>granules-core</module>
+		<module>granules-camel-kafka</module>
 	</modules>
 </project>

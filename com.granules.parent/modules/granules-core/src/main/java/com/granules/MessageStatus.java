@@ -2,10 +2,9 @@ package com.granules;
 
 public enum MessageStatus {
 	RECEIVED(0), //
-	DEQUEUED(1), //
-	PUBLISHED(2), //
-	PROCESSED(3), //
-	COMPLETED(4), //
+	PUBLISHED(1), //
+	PROCESSED(2), //
+	COMPLETED(3), //
 	;
 
 	public final byte code;
