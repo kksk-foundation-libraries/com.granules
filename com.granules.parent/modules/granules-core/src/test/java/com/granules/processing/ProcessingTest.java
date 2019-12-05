@@ -128,6 +128,7 @@ public class ProcessingTest {
 		Assert.assertTrue("message count must be 100", messageCount == 100L);
 		Assert.assertTrue("offset count must be 30", offsetCount == 30L);
 		Assert.assertTrue("processing count must be 0", processingCount == 0L);
+		cluster.close();
 	}
 
 	static String hex(byte... data) {

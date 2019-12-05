@@ -117,6 +117,7 @@ public class ReceiverTest {
 		Assert.assertTrue("message count must be 100", messageCount == 100L);
 		Assert.assertTrue("offset count must be 10", offsetCount == 10L);
 		Assert.assertTrue("processing count must be 0", processingCount == 0L);
+		ignite.close();
 	}
 
 	private static String hex(byte[] data) {

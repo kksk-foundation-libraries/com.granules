@@ -19,3 +19,8 @@ type MessageOffsetKey struct {
 	messageType				uint32
 	key						binary
 }
+
+type MessageOffsetRange struct {
+	messageOffsetFrom		MessageOffset
+	messageOffsetTo			MessageOffset
+}
