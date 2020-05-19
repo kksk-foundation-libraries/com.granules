@@ -2,10 +2,7 @@ package com.granules.client;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.util.Timer;
-import java.util.TimerTask;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.regex.Pattern;
 
@@ -21,7 +18,6 @@ import org.slf4j.LoggerFactory;
 public class ZookeeperSourceImageSubscriber extends AbstractSourceImageSubscriber {
 	private static final Logger LOG = LoggerFactory.getLogger(ZookeeperSourceImageSubscriber.class);
 
-	private static final AtomicInteger TIMER_SEQUENCE = new AtomicInteger();
 	private static final Pattern NUMERIC = Pattern.compile("^[0-9]$");
 
 	private final CuratorFramework client;
@@ -30,7 +26,6 @@ public class ZookeeperSourceImageSubscriber extends AbstractSourceImageSubscribe
 	private final int depth;
 	private final String dataPath;
 	private final AtomicBoolean closed = new AtomicBoolean(false);
-	private final Timer timer = new Timer(getClass().getSimpleName() + "-Timer-" + TIMER_SEQUENCE.incrementAndGet(), true);
 
 	private static CuratorFramework connect(String connectString) {
 		ExponentialBackoffRetry retryPolicy = new ExponentialBackoffRetry(100, 3);
@@ -129,34 +124,15 @@ public class ZookeeperSourceImageSubscriber extends AbstractSourceImageSubscribe
 		buf = client.getData().forPath(ZKPaths.makePath(dataPath, stringId, "FQCN"));
 		if (buf == null) {
 			onWarnning(new IllegalArgumentException("the path is required. path:" + ZKPaths.makePath(dataPath, stringId, "FQCN")));
-			retry(stringId, level + 1);
 			return;
 		}
 		fqcn = new String(buf);
 		buf = client.getData().forPath(ZKPaths.makePath(dataPath, stringId, "JAVA"));
 		if (buf == null) {
 			onWarnning(new IllegalArgumentException("the path is required. path:" + ZKPaths.makePath(dataPath, stringId, "JAVA")));
-			retry(stringId, level + 1);
 			return;
 		}
 		source = new String(buf);
 		LocalRegistry.registerSource(id, fqcn, source);
-	}
-
-	private void retry(String stringId, int level) {
-		if (level >= 10) {
-			onWarnning(new Exception("retry over."));
-			return;
-		}
-		timer.schedule(new TimerTask() {
-			@Override
-			public void run() {
-				try {
-					getData(stringId, level);
-				} catch (Exception e) {
-					onError(e);
-				}
-			}
-		}, 1_000L);
 	}
 }
