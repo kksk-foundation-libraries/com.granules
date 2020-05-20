@@ -10,8 +10,9 @@
 	<artifactId>granules-administrator</artifactId>
 	<dependencies>
 		<dependency>
-			<groupId>org.apache.curator</groupId>
-			<artifactId>curator-recipes</artifactId>
+			<groupId>com.granules</groupId>
+			<artifactId>granules-source-publisher</artifactId>
+			<version>${project.version}</version>
 		</dependency>
 	</dependencies>
 </project>

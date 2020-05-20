@@ -1,4 +1,4 @@
-package com.granules.client;
+package com.granules.source.subscriber;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -14,6 +14,8 @@ import org.apache.curator.retry.ExponentialBackoffRetry;
 import org.apache.curator.utils.ZKPaths;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.granules.registry.LocalRegistry;
 
 public class ZookeeperSourceImageSubscriber extends AbstractSourceImageSubscriber {
 	private static final Logger LOG = LoggerFactory.getLogger(ZookeeperSourceImageSubscriber.class);

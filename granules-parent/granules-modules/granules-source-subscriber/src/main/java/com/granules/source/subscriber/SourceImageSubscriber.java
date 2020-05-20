@@ -1,4 +1,4 @@
-package com.granules.client;
+package com.granules.source.subscriber;
 
 import java.io.Closeable;
 

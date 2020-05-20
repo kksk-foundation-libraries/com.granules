@@ -1,4 +1,4 @@
-package com.granules.client;
+package com.granules.registry;
 
 import java.lang.reflect.Constructor;
 import java.util.LinkedHashMap;
@@ -8,9 +8,10 @@ import java.util.concurrent.ConcurrentMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.granules.ErrorHandler;
 import com.granules.compilation.JavaInMemoryCompiler;
 
-public class LocalRegistry {
+public class LocalRegistry extends ErrorHandler {
 	private static final Logger LOG = LoggerFactory.getLogger(LocalRegistry.class);
 
 	private static final LocalRegistry INSTANCE = new LocalRegistry();
@@ -20,6 +21,7 @@ public class LocalRegistry {
 	private final ConcurrentMap<Integer, String> sourceMap = new ConcurrentHashMap<>();
 
 	private LocalRegistry() {
+		super(null, null);
 	}
 
 	public static void registerSource(Integer id, String fqcn, String source) {
@@ -42,7 +44,8 @@ public class LocalRegistry {
 		return classRegistry.computeIfAbsent(id, _id -> {
 			try {
 				return JavaInMemoryCompiler.compile(fqcnMap.get(_id), sourceMap.get(_id));
-			} catch (Exception ignore) {
+			} catch (Exception e) {
+				onError(e);
 				return null;
 			}
 		});
@@ -62,6 +65,7 @@ public class LocalRegistry {
 				return loadClass0(_id).getConstructor();
 			} catch (Exception e) {
 				LOG.error("could not create constructor:" + _id, e);
+				onError(e);
 				return null;
 			}
 		}).newInstance();

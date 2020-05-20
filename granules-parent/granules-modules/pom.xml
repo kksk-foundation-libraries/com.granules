@@ -46,7 +46,11 @@
 		</dependency>
 	</dependencies>
 	<modules>
-		<module>granules-client</module>
+		<module>granules-common</module>
+		<module>granules-class-registry</module>
+		<module>granules-source-publisher</module>
+		<module>granules-source-subscriber</module>
 		<module>granules-administrator</module>
+		<module>granules-client</module>
 	</modules>
 </project>

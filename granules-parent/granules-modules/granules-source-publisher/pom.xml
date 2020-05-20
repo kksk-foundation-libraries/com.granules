@@ -7,12 +7,16 @@
 		<artifactId>granules-modules</artifactId>
 		<version>0.0.1-SNAPSHOT</version>
 	</parent>
-	<artifactId>granules-client</artifactId>
+	<artifactId>granules-source-publisher</artifactId>
 	<dependencies>
 		<dependency>
 			<groupId>com.granules</groupId>
-			<artifactId>granules-source-subscriber</artifactId>
+			<artifactId>granules-common</artifactId>
 			<version>${project.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>org.apache.curator</groupId>
+			<artifactId>curator-recipes</artifactId>
 		</dependency>
 	</dependencies>
 </project>

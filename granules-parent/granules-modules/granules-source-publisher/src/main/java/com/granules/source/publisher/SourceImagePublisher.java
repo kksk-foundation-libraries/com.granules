@@ -1,4 +1,4 @@
-package com.granules.administrator;
+package com.granules.source.publisher;
 
 import java.io.ByteArrayInputStream;
 import java.io.File;
