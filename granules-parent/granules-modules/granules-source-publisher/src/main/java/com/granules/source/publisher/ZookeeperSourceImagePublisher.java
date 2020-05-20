@@ -18,12 +18,17 @@ import org.apache.curator.framework.CuratorFrameworkFactory;
 import org.apache.curator.retry.ExponentialBackoffRetry;
 import org.apache.curator.utils.ZKPaths;
 import org.apache.curator.utils.ZKPaths.PathAndNode;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class ZookeeperSourceImagePublisher extends AbstractSourceImagePublisher implements SourceImagePublisher, Closeable {
+	private static final Logger LOG = LoggerFactory.getLogger(ZookeeperSourceImagePublisher.class);
 
 	private static CuratorFramework connect(String connectString) {
 		ExponentialBackoffRetry retryPolicy = new ExponentialBackoffRetry(100, 3);
-		return CuratorFrameworkFactory.newClient(connectString, retryPolicy);
+		CuratorFramework client = CuratorFrameworkFactory.newClient(connectString, retryPolicy);
+		client.start();
+		return client;
 	}
 
 	private final CuratorFramework client;
@@ -68,6 +73,9 @@ public class ZookeeperSourceImagePublisher extends AbstractSourceImagePublisher 
 	@Override
 	public Future<Void> publish(Integer id, String fqcn, InputStream sourceInputStream) {
 		final String stringId = id.toString();
+		if (LOG.isDebugEnabled()) {
+			LOG.debug("publish. id:{}, fqcn:{}", id, fqcn);
+		}
 		return threadPool.submit(() -> {
 			ByteArrayOutputStream bos = new ByteArrayOutputStream();
 			try (BufferedInputStream in = new BufferedInputStream(sourceInputStream)) {

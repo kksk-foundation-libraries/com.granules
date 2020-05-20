@@ -7,23 +7,23 @@
 		<artifactId>granules-modules</artifactId>
 		<version>0.0.1-SNAPSHOT</version>
 	</parent>
-	<artifactId>granules-source-subscriber</artifactId>
+	<artifactId>granules-test</artifactId>
 	<dependencies>
 		<dependency>
-			<groupId>com.granules</groupId>
-			<artifactId>granules-class-registry</artifactId>
-			<version>${project.version}</version>
+			<groupId>junit</groupId>
+			<artifactId>junit</artifactId>
+			<scope>compile</scope>
 		</dependency>
 		<dependency>
 			<groupId>org.apache.curator</groupId>
-			<artifactId>curator-recipes</artifactId>
-		</dependency>
-
-		<dependency>
-			<groupId>com.granules</groupId>
-			<artifactId>granules-test</artifactId>
-			<version>${project.version}</version>
-			<scope>test</scope>
+			<artifactId>curator-test</artifactId>
+			<exclusions>
+				<exclusion>
+					<groupId>org.slf4j</groupId>
+					<artifactId>slf4j-log4j</artifactId>
+				</exclusion>
+			</exclusions>
+			<scope>compile</scope>
 		</dependency>
 	</dependencies>
 </project>
