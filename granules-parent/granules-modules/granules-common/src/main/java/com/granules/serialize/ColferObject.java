@@ -40,10 +40,9 @@ public interface ColferObject extends KryoSerializable {
 		}
 	}
 
-	@SuppressWarnings("unchecked")
 	default <T extends ColferObject> T unmarshal(byte[] buf) {
 		unmarshal(buf, 0);
-		return (T) this;
+		return cast();
 	}
 
 	@SuppressWarnings("unchecked")
