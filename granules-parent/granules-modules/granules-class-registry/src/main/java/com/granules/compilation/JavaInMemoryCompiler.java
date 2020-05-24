@@ -61,6 +61,12 @@ public class JavaInMemoryCompiler extends ErrorHandler {
 
 	private synchronized Class<?> compile0(String fqcn, String source) throws Exception {
 		try {
+			Class<?> clazz = Class.forName(fqcn);
+			onWarnning(new IllegalStateException("already loaded."));
+			return clazz;
+		} catch (ClassNotFoundException ignore) {
+		}
+		try {
 			final ByteArrayOutputStream baos = new ByteArrayOutputStream();
 			final SimpleJavaFileObject output = new SimpleJavaFileObject(URI.create("bytes:///" + fqcn.replaceAll("\\.", "/")), Kind.CLASS) {
 				ByteArrayOutputStream _baos = baos;

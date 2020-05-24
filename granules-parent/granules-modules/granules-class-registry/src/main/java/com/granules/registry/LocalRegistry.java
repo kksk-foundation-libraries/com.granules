@@ -17,6 +17,7 @@ public class LocalRegistry extends ErrorHandler {
 	private static final LocalRegistry INSTANCE = new LocalRegistry();
 	private final ConcurrentMap<Integer, Class<?>> classRegistry = new ConcurrentHashMap<>();
 	private final LinkedHashMap<Integer, Constructor<?>> constructorCache = new LinkedHashMap<>(10000, 1.0f, true);
+	private final ConcurrentMap<String, Integer> idMap = new ConcurrentHashMap<>();
 	private final ConcurrentMap<Integer, String> fqcnMap = new ConcurrentHashMap<>();
 	private final ConcurrentMap<Integer, String> sourceMap = new ConcurrentHashMap<>();
 
@@ -31,6 +32,14 @@ public class LocalRegistry extends ErrorHandler {
 	private void registerSource0(Integer id, String fqcn, String source) {
 		sourceMap.put(id, source);
 		fqcnMap.put(id, fqcn);
+		idMap.put(fqcn, id);
+	}
+
+	public static Class<?> loadClass(String fqcn) {
+		if (!INSTANCE.idMap.containsKey(fqcn)) {
+			return null;
+		}
+		return INSTANCE.loadClass0(INSTANCE.idMap.get(fqcn));
 	}
 
 	public static Class<?> loadClass(Integer id) {
@@ -43,12 +52,23 @@ public class LocalRegistry extends ErrorHandler {
 		}
 		return classRegistry.computeIfAbsent(id, _id -> {
 			try {
+				return Class.forName(fqcnMap.get(_id));
+			} catch (ClassNotFoundException ignore) {
+			}
+			try {
 				return JavaInMemoryCompiler.compile(fqcnMap.get(_id), sourceMap.get(_id));
 			} catch (Exception e) {
 				onError(e);
 				return null;
 			}
 		});
+	}
+
+	public static <T> T newInstance(String fqcn) throws Exception {
+		if (!INSTANCE.idMap.containsKey(fqcn)) {
+			return null;
+		}
+		return INSTANCE.newInstance0(INSTANCE.idMap.get(fqcn));
 	}
 
 	public static <T> T newInstance(Integer id) throws Exception {
